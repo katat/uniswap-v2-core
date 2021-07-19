@@ -22,11 +22,14 @@
     "node": ">=10"
   },
   "devDependencies": {
+    "@eth-optimism/ovm-toolchain": "0.0.1-alpha.11",
+    "@eth-optimism/solc": "0.5.16-alpha.7",
     "@types/chai": "^4.2.6",
     "@types/mocha": "^5.2.7",
     "chai": "^4.2.0",
-    "ethereum-waffle": "^2.4.1",
+    "ethereum-waffle": "=2.4.1",
     "ethereumjs-util": "^6.2.0",
+    "ethers": "4.0.46",
     "mocha": "^6.2.2",
     "prettier": "^1.19.1",
     "rimraf": "^3.0.0",
@@ -38,11 +41,16 @@
     "lint": "yarn prettier ./test/*.ts --check",
     "lint:fix": "yarn prettier ./test/*.ts --write",
     "clean": "rimraf ./build/",
+    "precompile:ovm": "yarn clean",
     "precompile": "yarn clean",
+    "compile:ovm": "waffle .waffle-ovm.json",
     "compile": "waffle .waffle.json",
+    "pretest:ovm": "yarn compile:ovm",
     "pretest": "yarn compile",
-    "test": "mocha",
+    "test:ovm": "env NODE_OPTIONS=--max_old_space_size=8192 env MODE=OVM mocha",
+    "test": "env MODE=REGULAR mocha",
     "prepublishOnly": "yarn test"
   },
-  "license": "GPL-3.0-or-later"
+  "license": "GPL-3.0-or-later",
+  "dependencies": {}
 }

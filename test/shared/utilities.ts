@@ -19,6 +19,7 @@ export function expandTo18Decimals(n: number): BigNumber {
 }
 
 function getDomainSeparator(name: string, tokenAddress: string) {
+  const chainId = process.env.MODE === 'OVM' ? 420 : 1
   return keccak256(
     defaultAbiCoder.encode(
       ['bytes32', 'bytes32', 'bytes32', 'uint256', 'address'],
@@ -26,7 +27,7 @@ function getDomainSeparator(name: string, tokenAddress: string) {
         keccak256(toUtf8Bytes('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')),
         keccak256(toUtf8Bytes(name)),
         keccak256(toUtf8Bytes('1')),
-        1,
+        chainId,
         tokenAddress
       ]
     )

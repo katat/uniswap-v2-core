@@ -1,13 +1,15 @@
 import chai, { expect } from 'chai'
-import { Contract } from 'ethers'
+import { Contract, Wallet } from 'ethers'
 import { MaxUint256 } from 'ethers/constants'
 import { bigNumberify, hexlify, keccak256, defaultAbiCoder, toUtf8Bytes } from 'ethers/utils'
-import { solidity, MockProvider, deployContract } from 'ethereum-waffle'
+import { solidity } from 'ethereum-waffle'
 import { ecsign } from 'ethereumjs-util'
 
+import { getProvider } from './shared/setup'
 import { expandTo18Decimals, getApprovalDigest } from './shared/utilities'
 
-import ERC20 from '../build/ERC20.json'
+import ERC20_Artifact from '../build/ERC20.json'
+import { _deployContract } from './shared/fixtures'
 
 chai.use(solidity)
 
@@ -15,20 +17,22 @@ const TOTAL_SUPPLY = expandTo18Decimals(10000)
 const TEST_AMOUNT = expandTo18Decimals(10)
 
 describe('UniswapV2ERC20', () => {
-  const provider = new MockProvider({
-    hardfork: 'istanbul',
-    mnemonic: 'horn horn horn horn horn horn horn horn horn horn horn horn',
-    gasLimit: 9999999
-  })
-  const [wallet, other] = provider.getWallets()
+  let provider
+  let wallet: Wallet
+  let other: Wallet
 
   let token: Contract
   beforeEach(async () => {
-    token = await deployContract(wallet, ERC20, [TOTAL_SUPPLY])
+    provider = await getProvider()
+    const wallets = provider.getWallets()
+    wallet = wallets[0]
+    other = wallets[1]
+    token = await _deployContract(wallet, ERC20_Artifact, [TOTAL_SUPPLY])
   })
 
   it('name, symbol, decimals, totalSupply, balanceOf, DOMAIN_SEPARATOR, PERMIT_TYPEHASH', async () => {
     const name = await token.name()
+    const chainId = process.env.MODE === 'OVM' ? 420 : 1
     expect(name).to.eq('Uniswap V2')
     expect(await token.symbol()).to.eq('UNI-V2')
     expect(await token.decimals()).to.eq(18)
@@ -44,7 +48,7 @@ describe('UniswapV2ERC20', () => {
             ),
             keccak256(toUtf8Bytes(name)),
             keccak256(toUtf8Bytes('1')),
-            1,
+            chainId,
             token.address
           ]
         )

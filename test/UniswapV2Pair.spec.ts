@@ -1,10 +1,11 @@
 import chai, { expect } from 'chai'
-import { Contract } from 'ethers'
-import { solidity, MockProvider, createFixtureLoader } from 'ethereum-waffle'
+import { Contract, Wallet } from 'ethers'
+import { solidity, MockProvider } from 'ethereum-waffle'
 import { BigNumber, bigNumberify } from 'ethers/utils'
 
+import { getProvider } from './shared/setup'
 import { expandTo18Decimals, mineBlock, encodePrice } from './shared/utilities'
-import { pairFixture } from './shared/fixtures'
+import { createFixtures, pairFixture } from './shared/fixtures'
 import { AddressZero } from 'ethers/constants'
 
 const MINIMUM_LIQUIDITY = bigNumberify(10).pow(3)
@@ -12,24 +13,23 @@ const MINIMUM_LIQUIDITY = bigNumberify(10).pow(3)
 chai.use(solidity)
 
 const overrides = {
-  gasLimit: 9999999
+  gasLimit: process.env.MODE === 'OVM' ? undefined : 9999999
 }
 
 describe('UniswapV2Pair', () => {
-  const provider = new MockProvider({
-    hardfork: 'istanbul',
-    mnemonic: 'horn horn horn horn horn horn horn horn horn horn horn horn',
-    gasLimit: 9999999
-  })
-  const [wallet, other] = provider.getWallets()
-  const loadFixture = createFixtureLoader(provider, [wallet])
-
+  let provider: MockProvider
+  let wallet: Wallet
+  let other: Wallet
   let factory: Contract
   let token0: Contract
   let token1: Contract
   let pair: Contract
   beforeEach(async () => {
-    const fixture = await loadFixture(pairFixture)
+    provider = await getProvider()
+    const wallets = provider.getWallets()
+    wallet = wallets[1]
+    other = wallets[0]
+    const fixture = await createFixtures(provider, pairFixture, [wallet])
     factory = fixture.factory
     token0 = fixture.token0
     token1 = fixture.token1
@@ -162,23 +162,32 @@ describe('UniswapV2Pair', () => {
     expect(await token1.balanceOf(wallet.address)).to.eq(totalSupplyToken1.sub(token1Amount).sub(swapAmount))
   })
 
-  it('swap:gas', async () => {
-    const token0Amount = expandTo18Decimals(5)
-    const token1Amount = expandTo18Decimals(10)
-    await addLiquidity(token0Amount, token1Amount)
+  //Disable for OVM test until the l2geth supports mineBlock API
+  if (process.env.MODE !== 'OVM') {
+    it('swap:gas', async () => {
+      const token0Amount = expandTo18Decimals(5)
+      const token1Amount = expandTo18Decimals(10)
+      console.log('adding liquidity...')
+      await addLiquidity(token0Amount, token1Amount)
+  
+      // ensure that setting price{0,1}CumulativeLast for the first time doesn't affect our gas math
+      await mineBlock(provider, (await provider.getBlock('latest')).timestamp + 1)
+      console.log('syncing pair...')
+      await pair.sync(overrides)
+  
+      const swapAmount = expandTo18Decimals(1)
+      const expectedOutputAmount = bigNumberify('453305446940074565')
+      console.log('transferring...')
+      await token1.transfer(pair.address, swapAmount)
+      console.log('mining block...')
+      await mineBlock(provider, (await provider.getBlock('latest')).timestamp + 1)
+      console.log('we swapping now...')
+      const tx = await pair.swap(expectedOutputAmount, 0, wallet.address, '0x', overrides)
+      const receipt = await tx.wait()
+      expect(receipt.gasUsed).to.eq(73462)
+    })
+  }
 
-    // ensure that setting price{0,1}CumulativeLast for the first time doesn't affect our gas math
-    await mineBlock(provider, (await provider.getBlock('latest')).timestamp + 1)
-    await pair.sync(overrides)
-
-    const swapAmount = expandTo18Decimals(1)
-    const expectedOutputAmount = bigNumberify('453305446940074565')
-    await token1.transfer(pair.address, swapAmount)
-    await mineBlock(provider, (await provider.getBlock('latest')).timestamp + 1)
-    const tx = await pair.swap(expectedOutputAmount, 0, wallet.address, '0x', overrides)
-    const receipt = await tx.wait()
-    expect(receipt.gasUsed).to.eq(73462)
-  })
 
   it('burn', async () => {
     const token0Amount = expandTo18Decimals(3)
@@ -209,38 +218,41 @@ describe('UniswapV2Pair', () => {
     expect(await token1.balanceOf(wallet.address)).to.eq(totalSupplyToken1.sub(1000))
   })
 
-  it('price{0,1}CumulativeLast', async () => {
-    const token0Amount = expandTo18Decimals(3)
-    const token1Amount = expandTo18Decimals(3)
-    await addLiquidity(token0Amount, token1Amount)
-
-    const blockTimestamp = (await pair.getReserves())[2]
-    await mineBlock(provider, blockTimestamp + 1)
-    await pair.sync(overrides)
-
-    const initialPrice = encodePrice(token0Amount, token1Amount)
-    expect(await pair.price0CumulativeLast()).to.eq(initialPrice[0])
-    expect(await pair.price1CumulativeLast()).to.eq(initialPrice[1])
-    expect((await pair.getReserves())[2]).to.eq(blockTimestamp + 1)
-
-    const swapAmount = expandTo18Decimals(3)
-    await token0.transfer(pair.address, swapAmount)
-    await mineBlock(provider, blockTimestamp + 10)
-    // swap to a new price eagerly instead of syncing
-    await pair.swap(0, expandTo18Decimals(1), wallet.address, '0x', overrides) // make the price nice
-
-    expect(await pair.price0CumulativeLast()).to.eq(initialPrice[0].mul(10))
-    expect(await pair.price1CumulativeLast()).to.eq(initialPrice[1].mul(10))
-    expect((await pair.getReserves())[2]).to.eq(blockTimestamp + 10)
-
-    await mineBlock(provider, blockTimestamp + 20)
-    await pair.sync(overrides)
-
-    const newPrice = encodePrice(expandTo18Decimals(6), expandTo18Decimals(2))
-    expect(await pair.price0CumulativeLast()).to.eq(initialPrice[0].mul(10).add(newPrice[0].mul(10)))
-    expect(await pair.price1CumulativeLast()).to.eq(initialPrice[1].mul(10).add(newPrice[1].mul(10)))
-    expect((await pair.getReserves())[2]).to.eq(blockTimestamp + 20)
-  })
+  //Disable for OVM test until the l2geth supports mineBlock API
+  if (process.env.MODE !== 'OVM') {
+    it('price{0,1}CumulativeLast', async () => {
+      const token0Amount = expandTo18Decimals(3)
+      const token1Amount = expandTo18Decimals(3)
+      await addLiquidity(token0Amount, token1Amount)
+  
+      const blockTimestamp = (await pair.getReserves())[2]
+      await mineBlock(provider, blockTimestamp + 1)
+      await pair.sync(overrides)
+  
+      const initialPrice = encodePrice(token0Amount, token1Amount)
+      expect(await pair.price0CumulativeLast()).to.eq(initialPrice[0])
+      expect(await pair.price1CumulativeLast()).to.eq(initialPrice[1])
+      expect((await pair.getReserves())[2]).to.eq(blockTimestamp + 1)
+  
+      const swapAmount = expandTo18Decimals(3)
+      await token0.transfer(pair.address, swapAmount)
+      await mineBlock(provider, blockTimestamp + 10)
+      // swap to a new price eagerly instead of syncing
+      await pair.swap(0, expandTo18Decimals(1), wallet.address, '0x', overrides) // make the price nice
+  
+      expect(await pair.price0CumulativeLast()).to.eq(initialPrice[0].mul(10))
+      expect(await pair.price1CumulativeLast()).to.eq(initialPrice[1].mul(10))
+      expect((await pair.getReserves())[2]).to.eq(blockTimestamp + 10)
+  
+      await mineBlock(provider, blockTimestamp + 20)
+      await pair.sync(overrides)
+  
+      const newPrice = encodePrice(expandTo18Decimals(6), expandTo18Decimals(2))
+      expect(await pair.price0CumulativeLast()).to.eq(initialPrice[0].mul(10).add(newPrice[0].mul(10)))
+      expect(await pair.price1CumulativeLast()).to.eq(initialPrice[1].mul(10).add(newPrice[1].mul(10)))
+      expect((await pair.getReserves())[2]).to.eq(blockTimestamp + 20)
+    })
+  }
 
   it('feeTo:off', async () => {
     const token0Amount = expandTo18Decimals(1000)
